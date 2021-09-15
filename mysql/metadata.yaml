@@ -10,22 +10,22 @@ description: |
 summary: |
   A MySQL operator charm for Kubernetes
 
-provides:
-  database:
-    interface: mysql_datastore
-
 containers:
   mysql:
     resource: mysql-image
     mounts:
-      - storage: db
-        location: /data/db
+      - storage: data
+        location: /var/lib/mysql
 
 resources:
   mysql-image:
     type: oci-image
     description: OCI image for mysql
 
+provides:
+  mysql:
+    interface: mysql
+
 storage:
-  db:
+  data:
     type: filesystem
