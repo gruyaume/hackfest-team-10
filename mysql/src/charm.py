@@ -16,8 +16,9 @@ import logging
 
 from ops.charm import CharmBase
 from ops.main import main
-from ops.model import ActiveStatus, WaitingStatus
+from ops.model import ActiveStatus
 from ops.framework import StoredState
+from ops.pebble import Layer
 
 logger = logging.getLogger(__name__)
 
@@ -31,42 +32,45 @@ class MysqlCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self._stored.set_default(mysql_initialized=False)
         self.port = MYSQL_PORT
+        self.framework.observe(self.on.mysql_pebble_ready, self._on_config_changed)
         self.framework.observe(self.on.config_changed, self._on_config_changed)
+        logging.info("hello")
 
     def _on_config_changed(self, event):
-        """Handle the config-changed event"""
-        # Get the mysql container so we can configure/manipulate it
+        """(Re)Configure mysql pebble layer specification.
+        A new mysql pebble layer specification is set only if it is
+        different from the current specification.
+        """
+        logger.debug("Running config changed handler")
         container = self.unit.get_container("mysql")
-        # Create a new config layer
-        layer = self._mysql_layer()
 
-        if container.can_connect():
-            # Get the current config
-            services = container.get_plan().to_dict().get("services", {})
-            # Check if there are any changes to services
-            if services != layer["services"]:
-                # Changes were made, add the new layer
-                container.add_layer("mysql", layer, combine=True)
-                logging.info("Added updated layer 'mysql' to Pebble plan")
-                # Restart it and report a new status to Juju
-                container.restart("mysql")
-                logging.info("Restarted mysql service")
-            # All is well, set an ActiveStatus
-            self.unit.status = ActiveStatus()
-        else:
-            self.unit.status = WaitingStatus("waiting for Pebble in workload container")
+        # Build layer
+        # layers = mysqlLayers(self.config)
+        mysql_layer = self.mysql_layer_2()
+        plan = container.get_plan()
+        service_changed = plan.services != mysql_layer.services
+        if service_changed:
+            container.add_layer("mysql", mysql_layer, combine=True)
 
-    def _mysql_layer(self):
-        """Returns a Pebble configration layer for Gosherve"""
-        return {
-            "summary": "mysql layer",
-            "description": "pebble config layer for mysql",
+        if service_changed:
+            container.stop("mysql")
+            container.start("mysql")
+            logger.info("Restarted mysql container")
+
+        self.unit.status = ActiveStatus()
+
+        # self._on_update_status(event)
+        logger.debug("Finished config changed handler")
+
+    def mysql_layer_2(self):
+        layer_spec = {
+            "summary": "MySQL layer",
+            "description": "Pebble layer configuration for replicated mysql",
             "services": {
                 "mysql": {
                     "override": "replace",
-                    "summary": "mysql",
+                    "summary": "mysql daemon",
                     "command": "/usr/local/bin/docker-entrypoint.sh",
                     "startup": "enabled",
                     "environment": {
@@ -79,6 +83,7 @@ class MysqlCharm(CharmBase):
                 }
             },
         }
+        return Layer(layer_spec)
 
 if __name__ == "__main__":
     main(MysqlCharm)
