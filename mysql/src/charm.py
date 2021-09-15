@@ -15,11 +15,13 @@ develop a new k8s charm using the Operator Framework:
 import logging
 
 from ops.charm import CharmBase
-from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus
+from ops.model import ActiveStatus, WaitingStatus
+from ops.framework import StoredState
 
 logger = logging.getLogger(__name__)
+
+MYSQL_PORT = 3306
 
 
 class MysqlCharm(CharmBase):
@@ -29,76 +31,54 @@ class MysqlCharm(CharmBase):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.framework.observe(self.on.httpbin_pebble_ready, self._on_httpbin_pebble_ready)
+        self._stored.set_default(mysql_initialized=False)
+        self.port = MYSQL_PORT
         self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(self.on.fortune_action, self._on_fortune_action)
-        self._stored.set_default(things=[])
 
-    def _on_httpbin_pebble_ready(self, event):
-        """Define and start a workload using the Pebble API.
+    def _on_config_changed(self, event):
+        """Handle the config-changed event"""
+        # Get the mysql container so we can configure/manipulate it
+        container = self.unit.get_container("mysql")
+        # Create a new config layer
+        layer = self._mysql_layer()
 
-        TEMPLATE-TODO: change this example to suit your needs.
-        You'll need to specify the right entrypoint and environment
-        configuration for your specific workload. Tip: you can see the
-        standard entrypoint of an existing container using docker inspect
+        if container.can_connect():
+            # Get the current config
+            services = container.get_plan().to_dict().get("services", {})
+            # Check if there are any changes to services
+            if services != layer["services"]:
+                # Changes were made, add the new layer
+                container.add_layer("mysql", layer, combine=True)
+                logging.info("Added updated layer 'mysql' to Pebble plan")
+                # Restart it and report a new status to Juju
+                container.restart("mysql")
+                logging.info("Restarted mysql service")
+            # All is well, set an ActiveStatus
+            self.unit.status = ActiveStatus()
+        else:
+            self.unit.status = WaitingStatus("waiting for Pebble in workload container")
 
-        Learn more about Pebble layers at https://github.com/canonical/pebble
-        """
-        # Get a reference the container attribute on the PebbleReadyEvent
-        container = event.workload
-        # Define an initial Pebble layer configuration
-        pebble_layer = {
-            "summary": "httpbin layer",
-            "description": "pebble config layer for httpbin",
+    def _mysql_layer(self):
+        """Returns a Pebble configration layer for Gosherve"""
+        return {
+            "summary": "mysql layer",
+            "description": "pebble config layer for mysql",
             "services": {
-                "httpbin": {
+                "mysql": {
                     "override": "replace",
-                    "summary": "httpbin",
-                    "command": "gunicorn -b 0.0.0.0:80 httpbin:app -k gevent",
+                    "summary": "mysql",
+                    "command": "/usr/local/bin/docker-entrypoint.sh",
                     "startup": "enabled",
-                    "environment": {"thing": self.model.config["thing"]},
+                    "environment": {
+                        "MYSQL_USER": "test",
+                        "MYSQL_PASSWORD": "test",
+                        "MYSQL_DATABASE": "oai_db",
+                        "MYSQL_ROOT_PASSWORD": "linux",
+                        "MYSQL_ALLOW_EMPTY_PASSWORD": "true"
+                    }
                 }
             },
         }
-        # Add intial Pebble config layer using the Pebble API
-        container.add_layer("httpbin", pebble_layer, combine=True)
-        # Autostart any services that were defined with startup: enabled
-        container.autostart()
-        # Learn more about statuses in the SDK docs:
-        # https://juju.is/docs/sdk/constructs#heading--statuses
-        self.unit.status = ActiveStatus()
-
-    def _on_config_changed(self, _):
-        """Just an example to show how to deal with changed configuration.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        If you don't need to handle config, you can remove this method,
-        the hook created in __init__.py for it, the corresponding test,
-        and the config.py file.
-
-        Learn more about config at https://juju.is/docs/sdk/config
-        """
-        current = self.config["thing"]
-        if current not in self._stored.things:
-            logger.debug("found a new thing: %r", current)
-            self._stored.things.append(current)
-
-    def _on_fortune_action(self, event):
-        """Just an example to show how to receive actions.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        If you don't need to handle actions, you can remove this method,
-        the hook created in __init__.py for it, the corresponding test,
-        and the actions.py file.
-
-        Learn more about actions at https://juju.is/docs/sdk/actions
-        """
-        fail = event.params["fail"]
-        if fail:
-            event.fail(fail)
-        else:
-            event.set_results({"fortune": "A bug in the code is worth two in the documentation."})
-
 
 if __name__ == "__main__":
     main(MysqlCharm)
