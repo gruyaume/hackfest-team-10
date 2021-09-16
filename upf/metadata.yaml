@@ -3,22 +3,22 @@
 
 # For a complete list of supported options, see:
 # https://discourse.charmhub.io/t/charm-metadata-v2/3674/15
-name: nrf
+name: upf
 
 description: |
-  OAI-NRF
+  OAI-UPF
 summary: |
-  A NRF-OAI operator charm for Kubernetes
+  A UPF-OAI operator charm for Kubernetes
 
 containers:
-  nrf:
-    resource: nrf-image
+  upf:
+    resource: upf-image
 
 resources:
-  nrf-image:
+  upf-image:
     type: oci-image
-    description: OCI image for nrf
+    description: OCI image for upf
 
-provides:
+requires:
   nrf:
     interface: nrf

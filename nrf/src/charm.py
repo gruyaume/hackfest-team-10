@@ -17,6 +17,7 @@ import logging
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus
+from kubernetes_api import Kubernetes
 import time
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,15 @@ class NrfCharm(CharmBase):
     def __init__(self, *args):
         super().__init__(*args)
         self.framework.observe(self.on.nrf_pebble_ready, self._on_nrf_pebble_ready)
+        self.framework.observe(self.on.install, self._on_install)
+
+    def _on_install(self, event):
+        namespace_file = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+        with open(namespace_file, "r") as f:
+            namespace = f.read().strip()
+        kubernetes = Kubernetes(namespace=namespace)
+        service_ports = [("nrf1", 80, 80, "TCP"), ("nrf2", 9090, 9090, "TCP")]
+        kubernetes.set_service_port(service_name="nrf", app_name="nrf", service_ports=service_ports)
 
     def _on_nrf_pebble_ready(self, event):
         container_name = "nrf"

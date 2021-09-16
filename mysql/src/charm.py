@@ -19,6 +19,7 @@ from pathlib import Path
 from ops.charm import CharmBase
 from ops.main import main
 from ops.model import ActiveStatus, WaitingStatus
+from kubernetes_api import Kubernetes
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,14 @@ class MysqlCharm(CharmBase):
     def __init__(self, *args):
         super().__init__(*args)
         self.framework.observe(self.on.mysql_pebble_ready, self._on_mysql_pebble_ready)
+        self.framework.observe(self.on.install, self._on_install)
+
+    def _on_install(self, event):
+        namespace_file = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+        with open(namespace_file, "r") as f:
+            namespace = f.read().strip()
+        kubernetes_api = Kubernetes(namespace)
+        kubernetes_api.set_service_port(service_name="mysql", app_name="myqsql", port=3306)
 
     def _on_mysql_pebble_ready(self, event):
         container_name = "mysql"
@@ -48,9 +57,9 @@ class MysqlCharm(CharmBase):
                         "MYSQL_PASSWORD": "test",
                         "MYSQL_USER": "test",
                         "MYSQL_DATABASE": "oai_db",
-                    },
+                    }
                 }
-            },
+            }
         }
         container.add_layer(container_name, pebble_layer, combine=True)
         container.push(

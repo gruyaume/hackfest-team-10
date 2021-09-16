@@ -15,89 +15,95 @@ develop a new k8s charm using the Operator Framework:
 import logging
 
 from ops.charm import CharmBase
-from ops.framework import StoredState
 from ops.main import main
-from ops.model import ActiveStatus
+from ops.model import ActiveStatus, WaitingStatus
+import time
+from kubernetes_api import Kubernetes
 
 logger = logging.getLogger(__name__)
 
 
 class AmfCharm(CharmBase):
-    """Charm the service."""
-
-    _stored = StoredState()
-
     def __init__(self, *args):
         super().__init__(*args)
-        self.framework.observe(self.on.httpbin_pebble_ready, self._on_httpbin_pebble_ready)
-        self.framework.observe(self.on.config_changed, self._on_config_changed)
-        self.framework.observe(self.on.fortune_action, self._on_fortune_action)
-        self._stored.set_default(things=[])
+        self.framework.observe(self.on.amf_pebble_ready, self._on_amf_pebble_ready)
+        self.framework.observe(self.on.install, self._on_install)
 
-    def _on_httpbin_pebble_ready(self, event):
-        """Define and start a workload using the Pebble API.
+    def _on_install(self, event):
+        namespace_file = "/var/run/secrets/kubernetes.io/serviceaccount/namespace"
+        with open(namespace_file, "r") as f:
+            namespace = f.read().strip()
+        kubernetes_api = Kubernetes(namespace)
+        service_ports = [("amf1", 38412, 38412, "TCP"), ("amf2", 80, 80, "TCP"), ("amf3", 9090, 9090, "TCP")]
+        kubernetes_api.set_service_port(service_name="amf", app_name="amf", service_ports=service_ports)
 
-        TEMPLATE-TODO: change this example to suit your needs.
-        You'll need to specify the right entrypoint and environment
-        configuration for your specific workload. Tip: you can see the
-        standard entrypoint of an existing container using docker inspect
-
-        Learn more about Pebble layers at https://github.com/canonical/pebble
-        """
-        # Get a reference the container attribute on the PebbleReadyEvent
-        container = event.workload
-        # Define an initial Pebble layer configuration
+    def _on_amf_pebble_ready(self, event):
+        container_name = "amf"
+        container = self.unit.get_container(container_name)
         pebble_layer = {
-            "summary": "httpbin layer",
-            "description": "pebble config layer for httpbin",
+            "summary": "amf layer",
+            "description": "pebble config layer for amf",
             "services": {
-                "httpbin": {
+                "amf": {
                     "override": "replace",
-                    "summary": "httpbin",
-                    "command": "gunicorn -b 0.0.0.0:80 httpbin:app -k gevent",
-                    "startup": "enabled",
-                    "environment": {"thing": self.model.config["thing"]},
+                    "summary": "amf",
+                    "command": "/bin/bash /openair-amf/bin/entrypoint.sh /openair-amf/bin/oai_amf -c /openair-amf/etc/amf.conf -o",
+                    "environment": {
+                        "INSTANCE": "0",
+                        "PID_DIRECTORY": "/var/run",
+                        "MCC": "208",
+                        "MNC": "95",
+                        "REGION_ID": "128",
+                        "AMF_SET_ID": "1",
+                        "SERVED_GUAMI_MCC_0": "208",
+                        "SERVED_GUAMI_MNC_0": "95",
+                        "SERVED_GUAMI_REGION_ID_0": "128",
+                        "SERVED_GUAMI_AMF_SET_ID_0": "1",
+                        "SERVED_GUAMI_MCC_1": "460",
+                        "SERVED_GUAMI_MNC_1": "11",
+                        "SERVED_GUAMI_REGION_ID_1": "10",
+                        "SERVED_GUAMI_AMF_SET_ID_1": "1",
+                        "PLMN_SUPPORT_MCC": "208",
+                        "PLMN_SUPPORT_MNC": "95",
+                        "PLMN_SUPPORT_TAC": "0xa000",
+                        "SST_0": "222",
+                        "SD_0": "123",
+                        "SST_1": "111",
+                        "SD_1": "124",
+                        "AMF_INTERFACE_NAME_FOR_NGAP": "eth0",
+                        "AMF_INTERFACE_NAME_FOR_N11": "eth0",
+                        "SMF_INSTANCE_ID_0": "1",
+                        "SMF_IPV4_ADDR_0": "0.0.0.0",
+                        "SMF_HTTP_VERSION_0": "v1",
+                        "SMF_FQDN_0": "localhost",
+                        "SMF_INSTANCE_ID_1": "2",
+                        "SMF_IPV4_ADDR_1": "0.0.0.0",
+                        "SMF_HTTP_VERSION_1": "v1",
+                        "SMF_FQDN_1": "localhost",
+                        "NRF_IPV4_ADDRESS": "0.0.0.0",
+                        "NRF_PORT": 80,
+                        "NRF_API_VERSION": "v1",
+                        "NRF_FQDN": "nrf",
+                        "AUSF_IPV4_ADDRESS": "127.0.0.1",
+                        "AUSF_PORT": 80,
+                        "AUSF_API_VERSION": "v1",
+                        "NF_REGISTRATION": "yes",
+                        "SMF_SELECTION": "yes",
+                        "USE_FQDN_DNS": "yes",
+                        "MYSQL_SERVER": "mysql",
+                        "MYSQL_USER": "root",
+                        "MYSQL_PASS": "linux",
+                        "MYSQL_DB": "oai_db",
+                        "OPERATOR_KEY": "63bfa50ee6523365ff14c1f45f88737d"
+                    },
                 }
             },
         }
-        # Add intial Pebble config layer using the Pebble API
-        container.add_layer("httpbin", pebble_layer, combine=True)
-        # Autostart any services that were defined with startup: enabled
-        container.autostart()
-        # Learn more about statuses in the SDK docs:
-        # https://juju.is/docs/sdk/constructs#heading--statuses
+        container.add_layer(container_name, pebble_layer, combine=True)
+        container.start("amf")
+        self.unit.status = WaitingStatus("Waiting 30 seconds for the service to start")
+        time.sleep(30)
         self.unit.status = ActiveStatus()
-
-    def _on_config_changed(self, _):
-        """Just an example to show how to deal with changed configuration.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        If you don't need to handle config, you can remove this method,
-        the hook created in __init__.py for it, the corresponding test,
-        and the config.py file.
-
-        Learn more about config at https://juju.is/docs/sdk/config
-        """
-        current = self.config["thing"]
-        if current not in self._stored.things:
-            logger.debug("found a new thing: %r", current)
-            self._stored.things.append(current)
-
-    def _on_fortune_action(self, event):
-        """Just an example to show how to receive actions.
-
-        TEMPLATE-TODO: change this example to suit your needs.
-        If you don't need to handle actions, you can remove this method,
-        the hook created in __init__.py for it, the corresponding test,
-        and the actions.py file.
-
-        Learn more about actions at https://juju.is/docs/sdk/actions
-        """
-        fail = event.params["fail"]
-        if fail:
-            event.fail(fail)
-        else:
-            event.set_results({"fortune": "A bug in the code is worth two in the documentation."})
 
 
 if __name__ == "__main__":

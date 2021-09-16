@@ -3,22 +3,28 @@
 
 # For a complete list of supported options, see:
 # https://discourse.charmhub.io/t/charm-metadata-v2/3674/15
-name: nrf
+name: smf
 
 description: |
-  OAI-NRF
+  OAI-SMF
 summary: |
-  A NRF-OAI operator charm for Kubernetes
+  A SMF-OAI operator charm for Kubernetes
 
 containers:
-  nrf:
-    resource: nrf-image
+  smf:
+    resource: smf-image
 
 resources:
-  nrf-image:
+  smf-image:
     type: oci-image
-    description: OCI image for nrf
+    description: OCI image for smf
 
 provides:
+  smf:
+    interface: smf
+
+requires:
   nrf:
     interface: nrf
+  amf:
+    interface: amf
